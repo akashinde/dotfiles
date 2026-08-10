@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Hyprland configuration backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=backup-hyprland-config.service
+
+[Install]
+WantedBy=timers.target

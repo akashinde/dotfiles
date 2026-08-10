@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up Hyprland and Quickshell configuration
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/backup-hyprland-config

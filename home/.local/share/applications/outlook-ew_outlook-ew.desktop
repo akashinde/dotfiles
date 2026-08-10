@@ -1,0 +1,11 @@
+[Desktop Entry]
+X-SnapInstanceName=outlook-ew
+Name=Outlook
+X-SnapAppName=outlook-ew
+Exec=/home/akash/.local/bin/outlook-ew %U
+Terminal=false
+Type=Application
+Icon=/snap/outlook-ew/current/meta/gui/icon.png
+StartupWMClass=Microsoft Outlook
+Comment=Unofficial Electron wrapper for Microsoft Outlook, built for Linux desktop.
+Categories=Office;

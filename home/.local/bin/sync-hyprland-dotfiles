@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_dir="${HYPRLAND_DOTFILES_REPO:-$HOME/Projects/dotfiles}"
+required_branch="${HYPRLAND_DOTFILES_BRANCH:-hyprland}"
+dry_run=false
+metadata_timeout="${HYPRLAND_METADATA_TIMEOUT:-8s}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  sync-hyprland-dotfiles [--dry-run]
+
+Copies the current Hyprland/end_4 desktop config into the dotfiles repo's
+hyprland branch using a home/ mirror layout.
+
+Environment:
+  HYPRLAND_DOTFILES_REPO      Defaults to ~/Projects/dotfiles
+  HYPRLAND_DOTFILES_BRANCH    Defaults to hyprland
+USAGE
+}
+
+log() {
+  printf '%s\n' "$*"
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+quote_cmd() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run_cmd() {
+  if "$dry_run"; then
+    quote_cmd "$@"
+  else
+    "$@"
+  fi
+}
+
+write_command_output() {
+  local output_file="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$metadata_timeout" "$@" > "$output_file" 2>&1 || true
+  else
+    "$@" > "$output_file" 2>&1 || true
+  fi
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --dry-run)
+      dry_run=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+[[ -d "$repo_dir/.git" ]] || die "Dotfiles repo not found: $repo_dir"
+
+current_branch="$(git -C "$repo_dir" branch --show-current)"
+[[ "$current_branch" == "$required_branch" ]] ||
+  die "Repo is on '$current_branch', expected '$required_branch'. Switch branches first."
+
+repo_home="$repo_dir/home"
+packages_dir="$repo_dir/packages"
+
+rsync_common=(
+  --archive
+  --delete
+  --delete-excluded
+  --exclude=.git
+  --exclude=.cache
+  --exclude=__pycache__
+  --exclude=backups
+  --exclude=mimeinfo.cache
+  --exclude='*.pyc'
+  --exclude='*.pyo'
+  --exclude='*.log'
+  --exclude='*.tar'
+  --exclude='*.tar.*'
+  --exclude='*.zst'
+  --exclude='*.gz'
+  --exclude='*.zip'
+)
+
+sync_dir() {
+  local rel_path="$1"
+  local src="$HOME/$rel_path"
+  local dst="$repo_home/$rel_path"
+
+  if [[ -d "$src" ]]; then
+    log "Sync directory: $rel_path"
+    run_cmd mkdir -p "$(dirname "$dst")"
+    run_cmd rsync "${rsync_common[@]}" "$src/" "$dst/"
+  elif [[ -e "$dst" ]]; then
+    log "Remove stale directory from repo: $rel_path"
+    run_cmd rm -rf "$dst"
+  else
+    log "Skip missing directory: $rel_path"
+  fi
+}
+
+sync_file() {
+  local rel_path="$1"
+  local src="$HOME/$rel_path"
+  local dst="$repo_home/$rel_path"
+
+  if [[ -f "$src" ]]; then
+    log "Sync file: $rel_path"
+    run_cmd mkdir -p "$(dirname "$dst")"
+    run_cmd rsync --archive "$src" "$dst"
+  elif [[ -e "$dst" ]]; then
+    log "Remove stale file from repo: $rel_path"
+    run_cmd rm -f "$dst"
+  else
+    log "Skip missing file: $rel_path"
+  fi
+}
+
+write_metadata() {
+  if "$dry_run"; then
+    quote_cmd mkdir -p "$packages_dir"
+    return 0
+  fi
+
+  mkdir -p "$packages_dir"
+
+  {
+    echo "Created: $(date --iso-8601=seconds)"
+    echo "Host: $(hostname)"
+    echo "User: $USER"
+    echo "Home: $HOME"
+    echo "Branch: $required_branch"
+  } > "$packages_dir/manifest.txt"
+
+  if command -v apt-mark >/dev/null 2>&1; then
+    write_command_output "$packages_dir/apt-manual.txt" apt-mark showmanual
+  fi
+
+  if command -v dpkg-query >/dev/null 2>&1; then
+    write_command_output "$packages_dir/dpkg-packages.tsv" dpkg-query -W -f='${binary:Package}\t${Version}\n'
+  fi
+
+  if command -v flatpak >/dev/null 2>&1; then
+    write_command_output "$packages_dir/flatpak-apps.txt" flatpak list --app --columns=application
+  fi
+
+  if command -v snap >/dev/null 2>&1; then
+    write_command_output "$packages_dir/snap-list.txt" snap list
+  fi
+
+  if command -v hyprctl >/dev/null 2>&1; then
+    write_command_output "$packages_dir/hyprland-version.txt" hyprctl version
+  fi
+
+  if command -v qs >/dev/null 2>&1; then
+    write_command_output "$packages_dir/quickshell-version.txt" qs --version
+  fi
+
+  if command -v xdg-mime >/dev/null 2>&1; then
+    write_command_output "$packages_dir/default-browser.txt" bash -c '
+      xdg-mime query default x-scheme-handler/http || true
+      xdg-mime query default x-scheme-handler/https || true
+      xdg-mime query default text/html || true
+    '
+  fi
+}
+
+sync_dir ".config/hypr"
+sync_dir ".config/quickshell"
+sync_dir ".config/kitty"
+sync_dir ".config/gtk-3.0"
+sync_dir ".config/gtk-4.0"
+sync_dir ".config/Kvantum"
+sync_dir ".config/fcitx5"
+sync_dir ".config/qt5ct"
+sync_dir ".config/qt6ct"
+sync_dir ".config/fontconfig"
+sync_dir ".config/rofi"
+sync_dir ".config/wofi"
+sync_dir ".config/swaync"
+sync_dir ".local/share/applications"
+
+sync_file ".config/mimeapps.list"
+sync_file ".config/user-dirs.dirs"
+sync_file ".config/systemd/user/backup-hyprland-config.service"
+sync_file ".config/systemd/user/backup-hyprland-config.timer"
+sync_file ".local/bin/backup-hyprland-config"
+sync_file ".local/bin/restore-hyprland-setup"
+sync_file ".local/bin/sync-hyprland-dotfiles"
+sync_file ".local/backups/hyprland/README.md"
+
+write_metadata
+
+log "Synced Hyprland dotfiles into $repo_dir on branch $required_branch."
+log "Review with: git -C \"$repo_dir\" status && git -C \"$repo_dir\" diff --stat"

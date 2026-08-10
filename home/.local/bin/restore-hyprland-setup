@@ -1,0 +1,508 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+backup_root="${HYPRLAND_BACKUP_ROOT:-$HOME/.local/backups/hyprland}"
+archive=""
+install_packages=false
+install_snaps=false
+restore_config=true
+dry_run=false
+assume_yes=false
+rewrite_home_mode="auto"
+tmpdir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  restore-hyprland-setup [options]
+
+Restores a Hyprland/end_4 setup from a backup archive created by
+backup-hyprland-config. By default it restores the newest archive from:
+  ~/.local/backups/hyprland
+
+Options:
+  --latest                 Restore the newest backup archive. This is the default.
+  --archive PATH           Restore this specific archive.
+  --install-packages       Best-effort install of APT and Flatpak apps from backup metadata.
+  --install-snaps          Also try to install Snap apps from backup metadata.
+  --packages-only          Install package metadata only; do not extract config.
+  --no-config              Same as --packages-only.
+  --rewrite-home auto      Rewrite old /home/<user> references to the current $HOME after restore.
+                           This is the default when the old home can be detected.
+  --rewrite-home PATH      Rewrite references from PATH to the current $HOME.
+  --no-rewrite-home        Do not rewrite absolute home-path references.
+  --dry-run                Print what would happen without changing anything.
+  -y, --yes                Do not ask for confirmation.
+  -h, --help               Show this help.
+
+Common examples:
+  restore-hyprland-setup --latest
+  restore-hyprland-setup --latest --install-packages
+  restore-hyprland-setup --archive /path/to/hyprland-config-YYYYMMDD-HHMMSS.tar.zst --install-packages
+USAGE
+}
+
+log() {
+  printf '%s\n' "$*"
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+quote_cmd() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run_cmd() {
+  if "$dry_run"; then
+    quote_cmd "$@"
+  else
+    "$@"
+  fi
+}
+
+confirm() {
+  local prompt="$1"
+  if "$assume_yes" || "$dry_run"; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    die "Refusing to continue without an interactive terminal. Re-run with --yes if this is intentional."
+  fi
+  read -r -p "$prompt [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES) ;;
+    *) die "Cancelled." ;;
+  esac
+}
+
+select_latest_archive() {
+  find "$backup_root" -maxdepth 1 -type f \( -name 'hyprland-config-*.tar.zst' -o -name 'hyprland-config-*.tar.gz' -o -name 'hyprland-config-*.tgz' \) -printf '%T@ %p\n' |
+    sort -nr |
+    sed -n '1s/^[^ ]* //p'
+}
+
+ensure_archive_tools() {
+  command -v tar >/dev/null 2>&1 || die "tar is required."
+
+  case "$archive" in
+    *.tar.zst)
+      if ! command -v zstd >/dev/null 2>&1; then
+        if "$install_packages" && command -v apt-get >/dev/null 2>&1; then
+          run_cmd sudo apt-get update
+          run_cmd sudo apt-get install -y zstd
+        else
+          die "zstd is required to restore .tar.zst archives. Install it with: sudo apt install zstd"
+        fi
+      fi
+      ;;
+  esac
+}
+
+tar_list() {
+  case "$archive" in
+    *.tar.zst) tar --zstd -tf "$archive" ;;
+    *.tar.gz|*.tgz) tar -tzf "$archive" ;;
+    *) tar -tf "$archive" ;;
+  esac
+}
+
+tar_extract_member_to_stdout() {
+  local member="$1"
+  case "$archive" in
+    *.tar.zst) tar --zstd -xOf "$archive" "$member" ;;
+    *.tar.gz|*.tgz) tar -xOzf "$archive" "$member" ;;
+    *) tar -xOf "$archive" "$member" ;;
+  esac
+}
+
+tar_extract_all_to_home() {
+  case "$archive" in
+    *.tar.zst) tar --zstd --exclude='.backup-metadata' --no-same-owner -xpf "$archive" -C "$HOME" ;;
+    *.tar.gz|*.tgz) tar --exclude='.backup-metadata' --no-same-owner -xzpf "$archive" -C "$HOME" ;;
+    *) tar --exclude='.backup-metadata' --no-same-owner -xpf "$archive" -C "$HOME" ;;
+  esac
+}
+
+verify_checksum() {
+  local checksum_file="$archive.sha256"
+  if [[ ! -f "$checksum_file" ]]; then
+    log "No checksum file found for $archive; skipping checksum verification."
+    return 0
+  fi
+
+  local expected actual
+  expected="$(awk 'NR == 1 {print $1}' "$checksum_file")"
+  actual="$(sha256sum "$archive" | awk '{print $1}')"
+  [[ -n "$expected" ]] || die "Checksum file exists but has no hash: $checksum_file"
+  [[ "$expected" == "$actual" ]] || die "Checksum mismatch for $archive"
+  log "Checksum OK: $archive"
+}
+
+validate_archive_paths() {
+  local bad_path
+  bad_path="$(
+    tar_list |
+      awk 'substr($0, 1, 1) == "/" || $0 ~ /(^|\/)\.\.(\/|$)/ {print; exit}'
+  )"
+  [[ -z "$bad_path" ]] || die "Unsafe path inside archive: $bad_path"
+}
+
+metadata_member() {
+  local filename="$1"
+  tar_list | awk -v name="$filename" '$0 ~ "^\\.backup-metadata/[^/]+/" name "$" {print; exit}'
+}
+
+metadata_to_file() {
+  local member="$1"
+  local output="$2"
+  if [[ -n "$member" ]]; then
+    tar_extract_member_to_stdout "$member" > "$output"
+  fi
+}
+
+detect_old_home() {
+  local manifest="$1"
+  local old_home old_user
+  old_home="$(awk -F': ' '$1 == "Home" {print $2; exit}' "$manifest" 2>/dev/null || true)"
+  if [[ -n "$old_home" ]]; then
+    printf '%s\n' "$old_home"
+    return 0
+  fi
+
+  old_user="$(awk -F': ' '$1 == "User" {print $2; exit}' "$manifest" 2>/dev/null || true)"
+  if [[ -n "$old_user" ]]; then
+    printf '/home/%s\n' "$old_user"
+  fi
+}
+
+extract_metadata() {
+  metadata_to_file "$(metadata_member manifest.txt)" "$tmpdir/manifest.txt"
+  metadata_to_file "$(metadata_member apt-manual.txt)" "$tmpdir/apt-manual.txt"
+  metadata_to_file "$(metadata_member flatpak-apps.txt)" "$tmpdir/flatpak-apps.txt"
+  metadata_to_file "$(metadata_member snap-list.txt)" "$tmpdir/snap-list.txt"
+}
+
+make_pre_restore_backup() {
+  local pre_restore_root="$backup_root/pre-restore"
+  local timestamp
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$pre_restore_root"
+
+  if [[ -x "$HOME/.local/bin/backup-hyprland-config" ]]; then
+    log "Creating pre-restore backup with backup-hyprland-config..."
+    if "$dry_run"; then
+      quote_cmd env HYPRLAND_BACKUP_ROOT="$pre_restore_root" "$HOME/.local/bin/backup-hyprland-config"
+    else
+      HYPRLAND_BACKUP_ROOT="$pre_restore_root" "$HOME/.local/bin/backup-hyprland-config"
+    fi
+    return 0
+  fi
+
+  log "Creating fallback pre-restore backup..."
+  local include_paths=(
+    ".config/hypr"
+    ".config/quickshell"
+    ".config/kitty"
+    ".config/hypridle"
+    ".config/hyprlock"
+    ".config/systemd/user"
+    ".local/bin"
+    ".local/state/quickshell"
+    ".local/share/applications"
+  )
+  local existing_paths=()
+  local rel_path
+  for rel_path in "${include_paths[@]}"; do
+    if [[ -e "$HOME/$rel_path" ]]; then
+      existing_paths+=("$rel_path")
+    fi
+  done
+
+  if ((${#existing_paths[@]} == 0)); then
+    log "No existing target config paths found; skipping pre-restore backup."
+    return 0
+  fi
+
+  local fallback_archive
+  if command -v zstd >/dev/null 2>&1 && tar --help 2>/dev/null | grep -q -- '--zstd'; then
+    fallback_archive="$pre_restore_root/pre-restore-$timestamp.tar.zst"
+    run_cmd tar --zstd -cpf "$fallback_archive" -C "$HOME" "${existing_paths[@]}"
+  else
+    fallback_archive="$pre_restore_root/pre-restore-$timestamp.tar.gz"
+    run_cmd tar -czpf "$fallback_archive" -C "$HOME" "${existing_paths[@]}"
+  fi
+}
+
+install_apt_packages() {
+  local apt_file="$tmpdir/apt-manual.txt"
+  [[ -s "$apt_file" ]] || return 0
+  command -v apt-get >/dev/null 2>&1 || {
+    log "APT not available; skipping APT package restore."
+    return 0
+  }
+  command -v dpkg-query >/dev/null 2>&1 || {
+    log "dpkg-query not available; skipping APT package restore."
+    return 0
+  }
+
+  local desired="$tmpdir/apt-desired.txt"
+  local installed="$tmpdir/apt-installed.txt"
+  local missing="$tmpdir/apt-missing.txt"
+
+  awk '/^[A-Za-z0-9][A-Za-z0-9.+-]+(:[A-Za-z0-9]+)?$/ {print}' "$apt_file" | sort -u > "$desired"
+  dpkg-query -W -f='${binary:Package}\n' | sort -u > "$installed"
+  comm -23 "$desired" "$installed" > "$missing"
+
+  if [[ ! -s "$missing" ]]; then
+    log "APT packages already satisfied."
+    return 0
+  fi
+
+  log "Installing missing APT packages from backup metadata..."
+  run_cmd sudo apt-get update
+
+  local batch=()
+  while true; do
+    mapfile -t -n 50 batch <&3
+    ((${#batch[@]} == 0)) && break
+    run_cmd sudo apt-get install -y "${batch[@]}"
+  done 3< "$missing"
+}
+
+install_flatpak_apps() {
+  local flatpak_file="$tmpdir/flatpak-apps.txt"
+  [[ -s "$flatpak_file" ]] || return 0
+  command -v flatpak >/dev/null 2>&1 || {
+    log "Flatpak not available; skipping Flatpak app restore."
+    return 0
+  }
+
+  local desired="$tmpdir/flatpak-desired.txt"
+  local installed="$tmpdir/flatpak-installed.txt"
+  local missing="$tmpdir/flatpak-missing.txt"
+
+  awk '{
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.[A-Za-z0-9_][A-Za-z0-9_-]*)+$/) print $i
+    }
+  }' "$flatpak_file" | sort -u > "$desired"
+
+  flatpak list --app --columns=application 2>/dev/null | sort -u > "$installed" ||
+    flatpak list --app 2>/dev/null |
+      awk '{
+        for (i = 1; i <= NF; i++) {
+          if ($i ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*(\.[A-Za-z0-9_][A-Za-z0-9_-]*)+$/) print $i
+        }
+      }' |
+      sort -u > "$installed"
+
+  comm -23 "$desired" "$installed" > "$missing"
+
+  if [[ ! -s "$missing" ]]; then
+    log "Flatpak apps already satisfied."
+    return 0
+  fi
+
+  log "Installing missing Flatpak apps from backup metadata..."
+  run_cmd flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+  local app
+  while IFS= read -r app; do
+    [[ -n "$app" ]] || continue
+    run_cmd flatpak install -y flathub "$app"
+  done < "$missing"
+}
+
+install_snap_apps() {
+  local snap_file="$tmpdir/snap-list.txt"
+  [[ -s "$snap_file" ]] || return 0
+  command -v snap >/dev/null 2>&1 || {
+    log "Snap not available; skipping Snap app restore."
+    return 0
+  }
+
+  local desired="$tmpdir/snap-desired.txt"
+  local installed="$tmpdir/snap-installed.txt"
+  local missing="$tmpdir/snap-missing.txt"
+
+  awk 'NR > 1 && $1 ~ /^[A-Za-z0-9][A-Za-z0-9_.+-]+$/ {print $1}' "$snap_file" | sort -u > "$desired"
+  snap list 2>/dev/null | awk 'NR > 1 {print $1}' | sort -u > "$installed" || true
+  comm -23 "$desired" "$installed" > "$missing"
+
+  if [[ ! -s "$missing" ]]; then
+    log "Snap apps already satisfied."
+    return 0
+  fi
+
+  log "Installing missing Snap apps from backup metadata..."
+  local snap_name
+  while IFS= read -r snap_name; do
+    [[ -n "$snap_name" ]] || continue
+    if ! run_cmd sudo snap install "$snap_name"; then
+      log "Could not install snap '$snap_name'. It may need a custom channel or --classic."
+    fi
+  done < "$missing"
+}
+
+install_packages_from_metadata() {
+  confirm "Install packages/apps from backup metadata now?"
+  install_apt_packages
+  install_flatpak_apps
+  if "$install_snaps"; then
+    install_snap_apps
+  elif [[ -s "$tmpdir/snap-list.txt" ]]; then
+    log "Snap metadata exists, but Snap restore is disabled. Re-run with --install-snaps to try it."
+  fi
+}
+
+rewrite_home_references() {
+  local old_home="$1"
+  [[ -n "$old_home" ]] || return 0
+  [[ "$old_home" != "$HOME" ]] || return 0
+
+  local targets=(
+    "$HOME/.config/hypr"
+    "$HOME/.config/quickshell"
+    "$HOME/.config/kitty"
+    "$HOME/.config/systemd/user"
+    "$HOME/.local/bin"
+    "$HOME/.local/share/applications"
+  )
+  local existing_targets=()
+  local target
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      existing_targets+=("$target")
+    fi
+  done
+  ((${#existing_targets[@]} > 0)) || return 0
+
+  log "Rewriting absolute home references: $old_home -> $HOME"
+  if "$dry_run"; then
+    quote_cmd grep -RIl "$old_home" "${existing_targets[@]}"
+    return 0
+  fi
+
+  local matches="$tmpdir/home-rewrite-files"
+  grep -RIlZ "$old_home" "${existing_targets[@]}" > "$matches" 2>/dev/null || true
+  xargs -0 -r sed -i "s|$old_home|$HOME|g" < "$matches"
+}
+
+post_restore() {
+  if [[ -f "$HOME/.local/bin/backup-hyprland-config" ]]; then
+    chmod +x "$HOME/.local/bin/backup-hyprland-config"
+  fi
+  if [[ -f "$HOME/.local/bin/restore-hyprland-setup" ]]; then
+    chmod +x "$HOME/.local/bin/restore-hyprland-setup"
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    if [[ -f "$HOME/.config/systemd/user/backup-hyprland-config.timer" ]]; then
+      systemctl --user enable --now backup-hyprland-config.timer >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if command -v hyprctl >/dev/null 2>&1; then
+    hyprctl reload >/dev/null 2>&1 || true
+  fi
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --latest)
+      archive=""
+      ;;
+    --archive)
+      shift
+      [[ $# -gt 0 ]] || die "--archive requires a path."
+      archive="$1"
+      ;;
+    --install-packages)
+      install_packages=true
+      ;;
+    --install-snaps)
+      install_packages=true
+      install_snaps=true
+      ;;
+    --packages-only|--no-config)
+      install_packages=true
+      restore_config=false
+      ;;
+    --rewrite-home)
+      shift
+      [[ $# -gt 0 ]] || die "--rewrite-home requires 'auto' or a path."
+      rewrite_home_mode="$1"
+      ;;
+    --no-rewrite-home)
+      rewrite_home_mode=""
+      ;;
+    --dry-run)
+      dry_run=true
+      ;;
+    -y|--yes)
+      assume_yes=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+if [[ -z "$archive" ]]; then
+  archive="$(select_latest_archive)"
+fi
+[[ -n "$archive" ]] || die "No Hyprland backup archives found in $backup_root"
+[[ -f "$archive" ]] || die "Archive not found: $archive"
+
+ensure_archive_tools
+verify_checksum
+validate_archive_paths
+extract_metadata
+
+old_home=""
+if [[ "$rewrite_home_mode" == "auto" && -s "$tmpdir/manifest.txt" ]]; then
+  old_home="$(detect_old_home "$tmpdir/manifest.txt")"
+elif [[ -n "$rewrite_home_mode" ]]; then
+  old_home="$rewrite_home_mode"
+fi
+
+log "Selected archive: $archive"
+if [[ -s "$tmpdir/manifest.txt" ]]; then
+  log "Backup metadata:"
+  sed -n '1,8p' "$tmpdir/manifest.txt"
+fi
+
+if "$install_packages"; then
+  install_packages_from_metadata
+fi
+
+if "$restore_config"; then
+  confirm "Restore config from this archive into $HOME?"
+  make_pre_restore_backup
+  log "Extracting config archive..."
+  run_cmd tar_extract_all_to_home
+  if ! "$dry_run"; then
+    rewrite_home_references "$old_home"
+    post_restore
+  elif [[ -n "$old_home" && "$old_home" != "$HOME" ]]; then
+    rewrite_home_references "$old_home"
+  fi
+fi
+
+log "Done."

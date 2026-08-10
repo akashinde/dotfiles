@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+dry_run=false
+assume_yes=false
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/install-hyprland-dotfiles [--dry-run] [--yes]
+
+Copies the tracked home/ mirror from this repository into $HOME.
+USAGE
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+quote_cmd() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run_cmd() {
+  if "$dry_run"; then
+    quote_cmd "$@"
+  else
+    "$@"
+  fi
+}
+
+confirm() {
+  if "$assume_yes" || "$dry_run"; then
+    return 0
+  fi
+  read -r -p "Install tracked Hyprland dotfiles into $HOME? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES) ;;
+    *) die "Cancelled." ;;
+  esac
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --dry-run)
+      dry_run=true
+      ;;
+    -y|--yes)
+      assume_yes=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+[[ -d "$repo_dir/home" ]] || die "Missing repo home/ directory: $repo_dir/home"
+
+confirm
+run_cmd rsync -a "$repo_dir/home/" "$HOME/"
+
+if ! "$dry_run"; then
+  chmod +x "$HOME/.local/bin/backup-hyprland-config" 2>/dev/null || true
+  chmod +x "$HOME/.local/bin/restore-hyprland-setup" 2>/dev/null || true
+  chmod +x "$HOME/.local/bin/sync-hyprland-dotfiles" 2>/dev/null || true
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now backup-hyprland-config.timer >/dev/null 2>&1 || true
+fi
+
+printf 'Installed tracked Hyprland dotfiles from %s\n' "$repo_dir"

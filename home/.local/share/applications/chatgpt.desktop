@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ChatGPT
+GenericName=AI Assistant
+Comment=Open ChatGPT
+Exec=/home/akash/.config/quickshell/ii/scripts/apps/open_chatgpt_app.sh
+Terminal=false
+Icon=chatgpt
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=chatgpt.com

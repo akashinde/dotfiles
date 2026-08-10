@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Microsoft Edge (Remote)
+Exec=/usr/bin/microsoft-edge --user-data-dir=~/.config/edge-remote
+Icon=google-chrome
+Categories=Network;WebBrowser;
+Terminal=false
+StartupNotify=true

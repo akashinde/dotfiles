@@ -1,0 +1,3 @@
+cmux-browser-nightly.desktop
+cmux-browser-nightly.desktop
+cmux-browser-nightly.desktop

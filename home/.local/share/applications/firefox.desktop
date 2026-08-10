@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Firefox
+GenericName=Web Browser
+Comment=Browse the Web
+Exec=/usr/bin/firefox %u
+Terminal=false
+Icon=/snap/firefox/current/default256.png
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/rss+xml;application/rdf+xml;image/gif;image/jpeg;image/png;image/webp;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=firefox
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=/usr/bin/firefox --new-window %u
+
+[Desktop Action new-private-window]
+Name=New Private Window
+Exec=/usr/bin/firefox --private-window %u

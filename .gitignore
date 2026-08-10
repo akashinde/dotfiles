@@ -1,0 +1,47 @@
+# Archives and generated backup outputs
+*.tar
+*.tar.*
+*.zst
+*.gz
+*.zip
+*.sha256
+
+# Caches and build outputs
+**/.cache/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.log
+**/node_modules/
+**/.venv/
+**/venv/
+
+# Never track private machine credentials.
+home/.ssh/
+home/.gnupg/
+home/.pki/
+home/.local/share/keyrings/
+home/.local/state/
+home/.cache/
+home/.local/share/applications/backups/
+home/.local/share/applications/mimeinfo.cache
+**/.env
+**/.env.*
+**/secrets.*
+**/secret.*
+**/credentials.*
+**/credential.*
+**/tokens.*
+**/token.*
+**/passwords.*
+**/password.*
+**/*service-account*.json
+**/*private-key*
+
+# Keep big local assets out of git. Backups cover these separately.
+home/.local/share/fonts/
+home/.local/share/icons/
+home/.local/share/themes/
+home/.icons/
+home/.themes/
+home/.fonts/

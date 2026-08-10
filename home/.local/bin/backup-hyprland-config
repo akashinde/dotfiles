@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+backup_root="${HYPRLAND_BACKUP_ROOT:-$HOME/.local/backups/hyprland}"
+keep_count="${HYPRLAND_BACKUP_KEEP:-30}"
+metadata_timeout="${HYPRLAND_METADATA_TIMEOUT:-8s}"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+tmpdir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+
+mkdir -p "$backup_root"
+
+write_command_output() {
+  local output_file="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$metadata_timeout" "$@" > "$output_file" 2>&1 || true
+  else
+    "$@" > "$output_file" 2>&1 || true
+  fi
+}
+
+include_paths=(
+  ".config/hypr"
+  ".config/quickshell"
+  ".config/kitty"
+  ".config/hypridle"
+  ".config/hyprlock"
+  ".config/rofi"
+  ".config/wofi"
+  ".config/swaync"
+  ".config/fcitx5"
+  ".config/gtk-3.0"
+  ".config/gtk-4.0"
+  ".config/Kvantum"
+  ".config/qt5ct"
+  ".config/qt6ct"
+  ".config/fontconfig"
+  ".config/systemd/user"
+  ".config/mimeapps.list"
+  ".config/user-dirs.dirs"
+  ".local/backups/hyprland/README.md"
+  ".local/bin"
+  ".local/state/quickshell"
+  ".local/share/applications"
+  ".local/share/icons"
+  ".local/share/themes"
+  ".local/share/fonts"
+  ".icons"
+  ".themes"
+  ".fonts"
+)
+
+existing_paths=()
+for rel_path in "${include_paths[@]}"; do
+  if [[ -e "$HOME/$rel_path" ]]; then
+    existing_paths+=("$rel_path")
+  fi
+done
+
+metadata_rel=".backup-metadata/hyprland-$timestamp"
+metadata_dir="$tmpdir/$metadata_rel"
+mkdir -p "$metadata_dir"
+
+{
+  echo "Created: $(date --iso-8601=seconds)"
+  echo "Host: $(hostname)"
+  echo "User: $USER"
+  echo "Home: $HOME"
+  echo "Backup root: $backup_root"
+  echo "Backup format: hyprland-config-v1"
+  echo
+  echo "Included paths:"
+  printf '%s\n' "${existing_paths[@]}"
+} > "$metadata_dir/manifest.txt"
+
+if command -v apt-mark >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/apt-manual.txt" apt-mark showmanual
+fi
+
+if command -v dpkg-query >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/dpkg-packages.tsv" dpkg-query -W -f='${binary:Package}\t${Version}\n'
+fi
+
+if command -v snap >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/snap-list.txt" snap list
+fi
+
+if command -v flatpak >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/flatpak-apps.txt" flatpak list --app --columns=application
+fi
+
+if command -v hyprctl >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/hyprland-version.txt" hyprctl version
+fi
+
+if command -v qs >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/quickshell-version.txt" qs --version
+fi
+
+if command -v xdg-mime >/dev/null 2>&1; then
+  write_command_output "$metadata_dir/default-browser.txt" bash -c '
+    xdg-mime query default x-scheme-handler/http || true
+    xdg-mime query default x-scheme-handler/https || true
+    xdg-mime query default text/html || true
+  '
+fi
+
+if command -v zstd >/dev/null 2>&1 && tar --help 2>/dev/null | grep -q -- '--zstd'; then
+  archive="$backup_root/hyprland-config-$timestamp.tar.zst"
+  tar --ignore-failed-read --zstd -cpf "$archive" -C "$HOME" "${existing_paths[@]}" -C "$tmpdir" "$metadata_rel"
+else
+  archive="$backup_root/hyprland-config-$timestamp.tar.gz"
+  tar --ignore-failed-read -czpf "$archive" -C "$HOME" "${existing_paths[@]}" -C "$tmpdir" "$metadata_rel"
+fi
+
+sha256sum "$archive" > "$archive.sha256"
+
+if [[ "$keep_count" =~ ^[0-9]+$ ]] && (( keep_count > 0 )); then
+  mapfile -t old_archives < <(
+    find "$backup_root" -maxdepth 1 -type f \( -name 'hyprland-config-*.tar.zst' -o -name 'hyprland-config-*.tar.gz' \) -printf '%T@ %p\n' |
+      sort -nr |
+      awk -v keep="$keep_count" 'NR > keep {print $2}'
+  )
+  for old_archive in "${old_archives[@]}"; do
+    rm -f "$old_archive" "$old_archive.sha256"
+  done
+fi
+
+echo "$archive"
