@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+version="${TEAMS_FOR_LINUX_VERSION:-2.14.1}"
+archive_name="teams-for-linux-$version.tar.gz"
+archive_url="${TEAMS_FOR_LINUX_URL:-https://github.com/IsmaelMartinez/teams-for-linux/releases/download/v$version/$archive_name}"
+known_sha_2_14_1="3f38fdd2cc4e9bc8e88eac77b2bfdb5f43d14aae93ac4d50635c606712e5f3fe"
+default_archive_sha=""
+if [[ "$version" == "2.14.1" ]]; then
+  default_archive_sha="$known_sha_2_14_1"
+fi
+archive_sha="${TEAMS_FOR_LINUX_SHA256:-$default_archive_sha}"
+install_root="${TEAMS_FOR_LINUX_INSTALL_ROOT:-$HOME/.local/opt}"
+app_dir="$install_root/teams-for-linux-$version"
+current_link="$install_root/teams-for-linux"
+dry_run=false
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/install-teams-for-linux-portable [--dry-run]
+
+Installs the official portable Teams for Linux release under:
+  ~/.local/opt/teams-for-linux-<version>
+
+This avoids the Snap runtime path that fails under this Hyprland setup.
+
+Environment:
+  TEAMS_FOR_LINUX_VERSION       Defaults to 2.14.1
+  TEAMS_FOR_LINUX_URL           Override release archive URL
+  TEAMS_FOR_LINUX_SHA256        Override archive SHA-256
+  TEAMS_FOR_LINUX_INSTALL_ROOT  Defaults to ~/.local/opt
+USAGE
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+quote_cmd() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run_cmd() {
+  if "$dry_run"; then
+    quote_cmd "$@"
+  else
+    "$@"
+  fi
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+copy_repo_launcher_files() {
+  run_cmd mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
+
+  if [[ -f "$repo_dir/home/.local/bin/teams-for-linux-portable" ]]; then
+    run_cmd cp -a "$repo_dir/home/.local/bin/teams-for-linux-portable" "$HOME/.local/bin/teams-for-linux-portable"
+    run_cmd chmod +x "$HOME/.local/bin/teams-for-linux-portable"
+  fi
+
+  run_cmd ln -sfn teams-for-linux-portable "$HOME/.local/bin/teams-for-linux"
+
+  if [[ -f "$repo_dir/home/.local/share/applications/teams-for-linux_teams-for-linux.desktop" ]]; then
+    run_cmd cp -a "$repo_dir/home/.local/share/applications/teams-for-linux_teams-for-linux.desktop" \
+      "$HOME/.local/share/applications/teams-for-linux_teams-for-linux.desktop"
+  fi
+
+  if [[ -f "$repo_dir/home/.local/share/applications/teams-for-linux.png" ]]; then
+    run_cmd cp -a "$repo_dir/home/.local/share/applications/teams-for-linux.png" \
+      "$HOME/.local/share/applications/teams-for-linux.png"
+  fi
+
+  local desktop_file="$HOME/.local/share/applications/teams-for-linux_teams-for-linux.desktop"
+  if [[ "$HOME" != "/home/akash" && -f "$desktop_file" ]]; then
+    run_cmd sed -i "s|/home/akash|$HOME|g" "$desktop_file"
+  fi
+
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    run_cmd update-desktop-database "$HOME/.local/share/applications"
+  fi
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --dry-run)
+      dry_run=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+require_cmd curl
+require_cmd tar
+require_cmd sha256sum
+
+if "$dry_run"; then
+  quote_cmd mkdir -p "$install_root"
+  quote_cmd curl -L --fail --progress-bar -o "/tmp/$archive_name" "$archive_url"
+  quote_cmd tar -xzf "/tmp/$archive_name" -C "$install_root"
+  quote_cmd ln -sfn "$app_dir" "$current_link"
+  copy_repo_launcher_files
+  exit 0
+fi
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+archive_path="$tmpdir/$archive_name"
+
+mkdir -p "$install_root"
+
+if [[ ! -x "$app_dir/teams-for-linux" ]]; then
+  curl -L --fail --progress-bar -o "$archive_path" "$archive_url"
+
+  if [[ -n "$archive_sha" ]]; then
+    printf '%s  %s\n' "$archive_sha" "$archive_path" | sha256sum -c -
+  fi
+
+  tar -xzf "$archive_path" -C "$install_root"
+fi
+
+[[ -x "$app_dir/teams-for-linux" ]] || die "Installed binary is missing: $app_dir/teams-for-linux"
+
+ln -sfn "$app_dir" "$current_link"
+copy_repo_launcher_files
+
+printf 'Installed Teams for Linux portable %s at %s\n' "$version" "$app_dir"

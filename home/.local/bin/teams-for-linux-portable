@@ -4,8 +4,11 @@ set -Eeuo pipefail
 app_dir="${TEAMS_FOR_LINUX_PORTABLE_DIR:-$HOME/.local/opt/teams-for-linux}"
 app_bin="$app_dir/teams-for-linux"
 
+# The Snap wrapper hardcodes --ozone-platform=x11, but the Snap sandbox can
+# hide /tmp/.X11-unix under Hyprland. The portable release avoids that runtime.
 if [[ ! -x "$app_bin" ]]; then
   printf 'teams-for-linux portable binary not found: %s\n' "$app_bin" >&2
+  printf 'Install it from the dotfiles repo with: scripts/install-teams-for-linux-portable\n' >&2
   exit 127
 fi
 

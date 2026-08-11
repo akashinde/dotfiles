@@ -71,3 +71,38 @@ For complete config restore, prefer the timestamped backup archives:
 That path verifies checksums, creates a pre-restore backup, restores config, and
 rewrites old home paths when moving to another username.
 
+## Teams For Linux On Hyprland
+
+The Snap package is intentionally bypassed in this setup. On this machine the
+Snap wrapper hardcoded `--ozone-platform=x11`, but inside the Snap sandbox
+`/tmp/.X11-unix` was unavailable, so Electron exited with:
+
+```text
+Missing X server or $DISPLAY
+```
+
+Forcing native Wayland got past that error but then hit the Snap/core22 Mesa
+runtime crash path described by upstream for newer Ubuntu systems.
+
+The tracked launcher therefore shadows the Snap desktop entry and runs:
+
+```text
+~/.local/bin/teams-for-linux -> teams-for-linux-portable
+```
+
+The portable binary itself is not committed to git. Install or refresh it with:
+
+```bash
+~/Projects/dotfiles/scripts/install-teams-for-linux-portable
+```
+
+Or restore dotfiles and install the portable Teams build in one step:
+
+```bash
+~/Projects/dotfiles/scripts/install-hyprland-dotfiles --yes --install-teams-portable
+```
+
+References:
+
+- Teams for Linux troubleshooting: `https://ismaelmartinez.github.io/teams-for-linux/troubleshooting/`
+- Snap core22/core24 tracking issue: `https://github.com/IsmaelMartinez/teams-for-linux/issues/2590`

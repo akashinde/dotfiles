@@ -7,4 +7,4 @@ Type=Application
 Icon=/home/akash/.local/share/applications/teams-for-linux.png
 StartupWMClass=teams-for-linux
 MimeType=x-scheme-handler/msteams;
-Categories=Chat;Network;Office;
+Categories=Network;Chat;

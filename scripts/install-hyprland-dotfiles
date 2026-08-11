@@ -4,13 +4,18 @@ set -Eeuo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dry_run=false
 assume_yes=false
+install_teams_portable=false
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/install-hyprland-dotfiles [--dry-run] [--yes]
+  scripts/install-hyprland-dotfiles [--dry-run] [--yes] [--install-teams-portable]
 
 Copies the tracked home/ mirror from this repository into $HOME.
+
+Options:
+  --install-teams-portable  Also install the official portable Teams for Linux
+                            release used by the Hyprland launcher workaround.
 USAGE
 }
 
@@ -44,6 +49,36 @@ confirm() {
   esac
 }
 
+rewrite_local_home_paths() {
+  local old_home="/home/akash"
+  local desktop_file="$HOME/.local/share/applications/teams-for-linux_teams-for-linux.desktop"
+
+  [[ "$HOME" != "$old_home" ]] || return 0
+  [[ -f "$desktop_file" ]] || return 0
+
+  if "$dry_run"; then
+    quote_cmd sed -i "s|$old_home|$HOME|g" "$desktop_file"
+  else
+    sed -i "s|$old_home|$HOME|g" "$desktop_file"
+  fi
+}
+
+setup_teams_portable() {
+  local installer="$repo_dir/scripts/install-teams-for-linux-portable"
+  local app_bin="$HOME/.local/opt/teams-for-linux/teams-for-linux"
+
+  if "$install_teams_portable"; then
+    [[ -x "$installer" ]] || die "Missing Teams portable installer: $installer"
+    run_cmd "$installer"
+    return 0
+  fi
+
+  if [[ -x "$HOME/.local/bin/teams-for-linux-portable" && ! -x "$app_bin" ]]; then
+    printf 'NOTE: Teams for Linux uses the portable release on Hyprland; the binary is not tracked in git.\n' >&2
+    printf '      Install it with: %s/scripts/install-teams-for-linux-portable\n' "$repo_dir" >&2
+  fi
+}
+
 while (($# > 0)); do
   case "$1" in
     --dry-run)
@@ -51,6 +86,9 @@ while (($# > 0)); do
       ;;
     -y|--yes)
       assume_yes=true
+      ;;
+    --install-teams-portable)
+      install_teams_portable=true
       ;;
     -h|--help)
       usage
@@ -72,8 +110,14 @@ if ! "$dry_run"; then
   chmod +x "$HOME/.local/bin/backup-hyprland-config" 2>/dev/null || true
   chmod +x "$HOME/.local/bin/restore-hyprland-setup" 2>/dev/null || true
   chmod +x "$HOME/.local/bin/sync-hyprland-dotfiles" 2>/dev/null || true
+  chmod +x "$HOME/.local/bin/teams-for-linux-portable" 2>/dev/null || true
+  rewrite_local_home_paths
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user enable --now backup-hyprland-config.timer >/dev/null 2>&1 || true
+else
+  rewrite_local_home_paths
 fi
+
+setup_teams_portable
 
 printf 'Installed tracked Hyprland dotfiles from %s\n' "$repo_dir"
