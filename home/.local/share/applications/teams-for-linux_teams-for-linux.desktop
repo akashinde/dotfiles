@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Teams for Linux
+Comment=Unofficial Microsoft Teams client for Linux using Electron
+Exec=/home/akash/.local/bin/teams-for-linux-portable %U
+Terminal=false
+Type=Application
+Icon=/snap/teams-for-linux/current/meta/gui/icon.png
+StartupWMClass=teams-for-linux
+MimeType=x-scheme-handler/msteams;
+Categories=Chat;Network;Office;

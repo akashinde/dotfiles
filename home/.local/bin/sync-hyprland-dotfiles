@@ -203,6 +203,8 @@ sync_file ".config/systemd/user/backup-hyprland-config.timer"
 sync_file ".local/bin/backup-hyprland-config"
 sync_file ".local/bin/restore-hyprland-setup"
 sync_file ".local/bin/sync-hyprland-dotfiles"
+sync_file ".local/bin/teams-for-linux"
+sync_file ".local/bin/teams-for-linux-portable"
 sync_file ".local/backups/hyprland/README.md"
 
 write_metadata
