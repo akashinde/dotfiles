@@ -124,7 +124,9 @@ That wrapper calls the packaged Electron binary directly:
 ```
 
 The `outlook-ew` Snap still needs to be installed because this uses its packaged
-binary. This avoids the Snap launcher/runtime wrapper and stores Outlook state
-under `~/.config/Microsoft Outlook` instead of `~/snap/outlook-ew/...`. A
-one-time sign-in after switching launchers is expected; after that, session
-state should persist in the normal config directory.
+binary. The wrapper exports Snap identity variables so the app does not enter
+its non-Snap relaunch/update path, but it avoids the Snap launcher/runtime
+wrapper and stores Outlook state under `~/.config/Microsoft Outlook` instead of
+`~/snap/outlook-ew/...`. A one-time sign-in after switching launchers is
+expected; after that, session state should persist in the normal config
+directory.

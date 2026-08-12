@@ -12,6 +12,10 @@ fi
 # The Snap launcher is fragile under Hyprland after resume. It can expose a
 # broken display/runtime environment and leave duplicate app entries. Running
 # the packaged Electron binary directly uses normal ~/.config state instead.
+export SNAP="/snap/outlook-ew/current"
+export SNAP_NAME="outlook-ew"
+export SNAPCRAFT_PROJECT_NAME="outlook-ew"
+
 exec "$app_bin" \
   --ozone-platform=x11 \
   --no-sandbox \
