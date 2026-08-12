@@ -51,15 +51,15 @@ confirm() {
 
 rewrite_local_home_paths() {
   local old_home="/home/akash"
-  local desktop_file="$HOME/.local/share/applications/teams-for-linux_teams-for-linux.desktop"
+  local applications_dir="$HOME/.local/share/applications"
 
   [[ "$HOME" != "$old_home" ]] || return 0
-  [[ -f "$desktop_file" ]] || return 0
+  [[ -d "$applications_dir" ]] || return 0
 
   if "$dry_run"; then
-    quote_cmd sed -i "s|$old_home|$HOME|g" "$desktop_file"
+    quote_cmd find "$applications_dir" -maxdepth 1 -type f -name "*.desktop" -exec sed -i "s|$old_home|$HOME|g" "{}" "+"
   else
-    sed -i "s|$old_home|$HOME|g" "$desktop_file"
+    find "$applications_dir" -maxdepth 1 -type f -name "*.desktop" -exec sed -i "s|$old_home|$HOME|g" "{}" "+"
   fi
 }
 
@@ -108,6 +108,7 @@ run_cmd rsync -a "$repo_dir/home/" "$HOME/"
 
 if ! "$dry_run"; then
   chmod +x "$HOME/.local/bin/backup-hyprland-config" 2>/dev/null || true
+  chmod +x "$HOME/.local/bin/outlook-ew" 2>/dev/null || true
   chmod +x "$HOME/.local/bin/restore-hyprland-setup" 2>/dev/null || true
   chmod +x "$HOME/.local/bin/sync-hyprland-dotfiles" 2>/dev/null || true
   chmod +x "$HOME/.local/bin/teams-for-linux-portable" 2>/dev/null || true

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Outlook
+GenericName=Mail
+Comment=Open Microsoft Outlook
+Exec=/home/akash/.local/bin/outlook-ew %U
+Terminal=false
+Type=Application
+Icon=/snap/outlook-ew/current/meta/gui/icon.png
+StartupWMClass=Microsoft Outlook
+Categories=Office;Email;
+Keywords=mail;email;calendar;microsoft;office;365;outlook;

@@ -106,3 +106,25 @@ References:
 
 - Teams for Linux troubleshooting: `https://ismaelmartinez.github.io/teams-for-linux/troubleshooting/`
 - Snap core22/core24 tracking issue: `https://github.com/IsmaelMartinez/teams-for-linux/issues/2590`
+
+## Outlook On Hyprland
+
+The `outlook-ew` Snap desktop entry is hidden locally because it can leave a
+stale Wayland-forced Snap process after resume, and it also appears as a second
+Outlook result in the launcher. The visible `outlook.desktop` entry runs:
+
+```text
+~/.local/bin/outlook-ew
+```
+
+That wrapper calls the packaged Electron binary directly:
+
+```text
+/snap/outlook-ew/current/outlook-ew --ozone-platform=x11 --no-sandbox --disable-gpu --disable-gpu-compositing
+```
+
+The `outlook-ew` Snap still needs to be installed because this uses its packaged
+binary. This avoids the Snap launcher/runtime wrapper and stores Outlook state
+under `~/.config/Microsoft Outlook` instead of `~/snap/outlook-ew/...`. A
+one-time sign-in after switching launchers is expected; after that, session
+state should persist in the normal config directory.

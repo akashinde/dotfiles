@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+app_bin="/snap/outlook-ew/current/outlook-ew"
+
+if [[ ! -x "$app_bin" ]]; then
+  printf 'Outlook EW binary not found: %s\n' "$app_bin" >&2
+  printf 'Install the outlook-ew snap or replace this wrapper with another Outlook launcher.\n' >&2
+  exit 127
+fi
+
+# The Snap launcher is fragile under Hyprland after resume. It can expose a
+# broken display/runtime environment and leave duplicate app entries. Running
+# the packaged Electron binary directly uses normal ~/.config state instead.
+exec "$app_bin" \
+  --ozone-platform=x11 \
+  --no-sandbox \
+  --disable-gpu \
+  --disable-gpu-compositing \
+  "$@"
