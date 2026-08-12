@@ -37,6 +37,11 @@ git commit -m "Update Hyprland dotfiles"
 git push -u origin hyprland
 ```
 
+Maintenance rule: after fixing any Hyprland/end_4 config, launcher, script, or
+desktop integration issue, sync the relevant files into this repository, commit
+on the `hyprland` branch, and push `origin hyprland` before considering the fix
+done.
+
 ## Restore From Git On A Machine
 
 Clone the branch:
@@ -108,6 +113,17 @@ References:
 - Snap core22/core24 tracking issue: `https://github.com/IsmaelMartinez/teams-for-linux/issues/2590`
 
 ## Outlook On Hyprland
+
+Fix log, 2026-08-12:
+
+- Symptom: the Quickshell app launcher showed multiple Outlook results.
+- Cause: old Outlook `.desktop` backup files were still under
+  `~/.local/share/applications/backups`, and app launchers can scan that
+  directory recursively. The setup also had a separate visible `outlook.desktop`
+  file plus a local Snap override.
+- Fix: move launcher backups outside the XDG applications path, remove the
+  extra `outlook.desktop`, and make `outlook-ew_outlook-ew.desktop` the single
+  visible local launcher that shadows the Snap desktop ID.
 
 The tracked `outlook-ew_outlook-ew.desktop` file intentionally uses the same
 desktop ID as the Snap entry, so it shadows the Snap launcher with the working
