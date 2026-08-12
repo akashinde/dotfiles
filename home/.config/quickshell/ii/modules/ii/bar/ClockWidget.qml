@@ -1,3 +1,4 @@
+import qs
 import qs.modules.common
 import qs.modules.common.widgets
 import qs.services
@@ -8,6 +9,7 @@ Item {
     id: root
     property bool borderless: Config.options.bar.borderless
     property bool showDate: Config.options.bar.verbose
+    property bool calendarOpen: false
     implicitWidth: rowLayout.implicitWidth
     implicitHeight: Appearance.sizes.barHeight
 
@@ -40,10 +42,28 @@ Item {
     MouseArea {
         id: mouseArea
         anchors.fill: parent
-        hoverEnabled: !Config.options.bar.tooltips.clickToShow
+        acceptedButtons: Qt.LeftButton
+        cursorShape: Qt.PointingHandCursor
+        hoverEnabled: true
+
+        onPressed: mouse => {
+            mouse.accepted = true;
+        }
+
+        onClicked: mouse => {
+            if (mouse.button !== Qt.LeftButton)
+                return;
+
+            root.calendarOpen = !root.calendarOpen;
+            if (root.calendarOpen)
+                GlobalStates.sidebarRightOpen = false;
+            mouse.accepted = true;
+        }
 
         ClockWidgetPopup {
-            hoverTarget: mouseArea
+            anchorItem: mouseArea
+            open: root.calendarOpen
+            onCloseRequested: root.calendarOpen = false
         }
     }
 }

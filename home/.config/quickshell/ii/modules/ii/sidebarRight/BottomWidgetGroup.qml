@@ -17,6 +17,7 @@ Rectangle {
     property int selectedTab: Persistent.states.sidebar.bottomGroup.tab
     property int previousIndex: -1
     property bool collapsed: Persistent.states.sidebar.bottomGroup.collapsed
+    property bool showCollapseControls: true
     property var tabs: [
         {
             "type": "calendar",
@@ -96,6 +97,7 @@ Rectangle {
         spacing: 15
 
         CalendarHeaderButton {
+            visible: root.showCollapseControls
             Layout.margins: 10
             Layout.rightMargin: 0
             forceCircle: true
@@ -173,6 +175,7 @@ Rectangle {
             }
             // Collapse button
             CalendarHeaderButton {
+                visible: root.showCollapseControls
                 anchors.left: parent.left
                 anchors.top: parent.top
                 forceCircle: true

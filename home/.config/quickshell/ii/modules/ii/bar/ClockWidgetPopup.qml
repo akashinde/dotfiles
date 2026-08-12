@@ -1,69 +1,110 @@
+import qs
 import qs.modules.common
 import qs.modules.common.widgets
+import qs.modules.ii.sidebarRight
 import qs.services
 import QtQuick
-import QtQuick.Layouts
+import Quickshell
+import Quickshell.Wayland
 
-StyledPopup {
+LazyLoader {
     id: root
-    property string formattedDate: Qt.locale().toString(DateTime.clock.date, "dddd, MMMM dd, yyyy")
-    property string formattedTime: DateTime.time
-    property string formattedUptime: DateTime.uptime
-    property string todosSection: getUpcomingTodos()
+    property Item anchorItem
+    property bool open: false
+    signal closeRequested()
 
-    function getUpcomingTodos() {
-        const unfinishedTodos = Todo.list.filter(function (item) {
-            return !item.done;
-        });
-        if (unfinishedTodos.length === 0) {
-            return Translation.tr("No pending tasks");
+    active: root.open && root.anchorItem !== null
+
+    component: PanelWindow {
+        id: popupWindow
+        color: "transparent"
+        exclusiveZone: 0
+        exclusionMode: ExclusionMode.Ignore
+        implicitWidth: popupBackground.implicitWidth + Appearance.sizes.elevationMargin * 2
+        implicitHeight: popupBackground.implicitHeight + Appearance.sizes.elevationMargin * 2
+        WlrLayershell.namespace: "quickshell:clockCalendar"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+        WlrLayershell.layer: WlrLayer.Overlay
+
+        anchors {
+            top: true
+            left: true
         }
 
-        // Limit to first 5 todos to keep popup manageable
-        const limitedTodos = unfinishedTodos.slice(0, 5);
-        let todoText = limitedTodos.map(function (item, index) {
-            return `  ${index + 1}. ${item.content}`;
-        }).join('\n');
-
-        if (unfinishedTodos.length > 5) {
-            todoText += `\n  ${Translation.tr("... and %1 more").arg(unfinishedTodos.length - 5)}`;
+        margins {
+            left: {
+                const mapped = root.QsWindow?.mapFromItem(
+                    root.anchorItem,
+                    (root.anchorItem.width - popupBackground.implicitWidth) / 2,
+                    0
+                );
+                const desired = mapped?.x ?? 0;
+                const screenWidth = root.QsWindow?.screen?.width ?? (desired + popupBackground.implicitWidth);
+                const maxX = screenWidth - popupBackground.implicitWidth - Appearance.sizes.hyprlandGapsOut;
+                return Math.max(Appearance.sizes.hyprlandGapsOut, Math.min(desired, maxX));
+            }
+            top: Math.max(0, Appearance.sizes.barHeight - Appearance.sizes.elevationMargin + 2)
         }
 
-        return todoText;
-    }
-
-    ColumnLayout {
-        id: columnLayout
-        anchors.centerIn: parent
-        spacing: 4
-
-        StyledPopupHeaderRow {
-            icon: "calendar_month"
-            label: root.formattedDate
+        mask: Region {
+            item: popupBackground
         }
 
-        StyledPopupValueRow {
-            icon: "timelapse"
-            label: Translation.tr("System uptime:")
-            value: root.formattedUptime
+        Component.onCompleted: {
+            GlobalFocusGrab.addDismissable(popupWindow);
+            bottomWidgetGroup.forceActiveFocus();
         }
 
-        // Tasks
-        Column {
-            spacing: 0
-            Layout.fillWidth: true
+        Component.onDestruction: {
+            GlobalFocusGrab.removeDismissable(popupWindow);
+        }
 
-            StyledPopupValueRow {
-                icon: "checklist"
-                label: Translation.tr("To Do:")
-                value: ""
+        Connections {
+            target: GlobalFocusGrab
+            function onDismissed() {
+                root.closeRequested();
+            }
+        }
+
+        StyledRectangularShadow {
+            target: popupBackground
+        }
+
+        Rectangle {
+            id: popupBackground
+            readonly property real horizontalPadding: 8
+            readonly property real topPadding: 0
+            readonly property real bottomPadding: 8
+            anchors {
+                fill: parent
+                margins: Appearance.sizes.elevationMargin
+            }
+            implicitWidth: bottomWidgetGroup.width + horizontalPadding * 2
+            implicitHeight: bottomWidgetGroup.height + topPadding + bottomPadding
+            color: Appearance.m3colors.m3surfaceContainer
+            radius: Appearance.rounding.small
+            border.width: 1
+            border.color: Appearance.colors.colLayer0Border
+
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Escape) {
+                    root.closeRequested();
+                    event.accepted = true;
+                }
             }
 
-            StyledText {
-                horizontalAlignment: Text.AlignLeft
-                wrapMode: Text.Wrap
-                color: Appearance.colors.colOnSurfaceVariant
-                text: root.todosSection
+            BottomWidgetGroup {
+                id: bottomWidgetGroup
+                anchors {
+                    top: parent.top
+                    horizontalCenter: parent.horizontalCenter
+                    topMargin: popupBackground.topPadding
+                }
+                width: Appearance.sizes.sidebarWidth
+                height: implicitHeight
+                collapsed: false
+                showCollapseControls: false
+                focus: true
             }
         }
     }
