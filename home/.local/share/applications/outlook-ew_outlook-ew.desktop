@@ -1,5 +1,12 @@
 [Desktop Entry]
+X-SnapInstanceName=outlook-ew
 Type=Application
-Name=Hidden Snap Entry
-NoDisplay=true
-Hidden=true
+Name=Outlook
+GenericName=Mail
+Comment=Open Microsoft Outlook
+Exec=/home/akash/.local/bin/outlook-ew %U
+Terminal=false
+Icon=/snap/outlook-ew/current/meta/gui/icon.png
+StartupWMClass=Microsoft Outlook
+Categories=Office;Email;
+Keywords=mail;email;calendar;microsoft;office;365;outlook;

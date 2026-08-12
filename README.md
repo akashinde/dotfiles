@@ -109,9 +109,9 @@ References:
 
 ## Outlook On Hyprland
 
-The `outlook-ew` Snap desktop entry is hidden locally because it can leave a
-stale Wayland-forced Snap process after resume, and it also appears as a second
-Outlook result in the launcher. The visible `outlook.desktop` entry runs:
+The tracked `outlook-ew_outlook-ew.desktop` file intentionally uses the same
+desktop ID as the Snap entry, so it shadows the Snap launcher with the working
+Hyprland command instead of creating a second Outlook result. It runs:
 
 ```text
 ~/.local/bin/outlook-ew
@@ -130,3 +130,8 @@ wrapper and stores Outlook state under `~/.config/Microsoft Outlook` instead of
 `~/snap/outlook-ew/...`. A one-time sign-in after switching launchers is
 expected; after that, session state should persist in the normal config
 directory.
+
+Do not keep launcher backups under `~/.local/share/applications`. Some app
+launchers scan that directory recursively and will show old backup `.desktop`
+files as duplicate apps. Use `~/.local/backups/application-launchers/` for those
+backup files instead.
